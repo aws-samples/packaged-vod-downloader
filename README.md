@@ -92,6 +92,8 @@ The 'medipackageRole' parameter (optional) defines the role to be used for the c
 
 The 'mediaPackageCdnAuthSecret' parameter (optional) defines the AWS Secrets Manager Secret containing the AWS Elemental MediaPackage [CDN Auth header secret](https://docs.aws.amazon.com/mediapackage/latest/ug/cdn-auth.html) for the Packaging Configuration being used with the sample. This parameter is provided to simplify setting up the AWS Sample with a packaging configuration using CDN Auth. Setting this parameter will configure the IAM role used by the AWS Step Function with permissions to access the specified secret. This allows the Step Function to access the secret and pass value to AWS Lambda to be included in requests to download resources. If more than one packaging configuration with CDN Auth enabled will be used with the sample the IAM policy associated with the Step Function role will need to be manually modified.
 
+** Note: Enabling CDN Auth on AWS Elemental MediaPackage Packaging Groups is highly recommended to restrict access to the endpoints. **
+
 If the solution is being deployed into the default profile no additional environment variables need to be set. If the solution is being deployed using the non-default profile the AWS CLI environment variables should be used to specify the access key id, secret access key and region. Below is an example of the environment variables which need to be set.
 ```
 export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
