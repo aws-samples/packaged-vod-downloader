@@ -1,0 +1,436 @@
+{
+  "Comment": "MediaPackage VOD Downloader state machine to harvest MediaPackage VOD Assets to S3",
+  "StartAt": "Get MediaPackage VOD Asset",
+  "States": {
+    "Get MediaPackage VOD Asset": {
+      "Type": "Task",
+      "Next": "DescribePackagingGroup",
+      "Parameters": {
+        "Id.$": "$.Id"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:mediapackagevod:describeAsset",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Check exception type",
+          "Comment": "Describe MediaPackage VOD Asset Exception",
+          "ResultPath": "$.describeVodAssetException"
+        }
+      ],
+      "ResultPath": "$.mediaPackageVodAsset",
+      "InputPath": "$.createAssetRequest"
+    },
+    "DescribePackagingGroup": {
+      "Type": "Task",
+      "Next": "Check if Packaging Group uses Authentication",
+      "Parameters": {
+        "Id.$": "$.createAssetRequest.PackagingGroupId"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:mediapackagevod:describePackagingGroup",
+      "ResultPath": "$.mediaPackagePackagingGroup",
+      "Comment": "Required to check if packaging configuration has CdnIdentifierSecret"
+    },
+    "Check if Packaging Group uses Authentication": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.mediaPackagePackagingGroup.Authorization",
+          "IsPresent": true,
+          "Next": "GetSecretValue"
+        }
+      ],
+      "Default": "Set secret to blank value"
+    },
+    "Set secret to blank value": {
+      "Type": "Pass",
+      "Next": "Process MediaPackage VOD Packaging Configuration Asset",
+      "ResultPath": "$.PackagingGroupAuthHeader",
+      "Parameters": {
+        "SecretString": ""
+      }
+    },
+    "GetSecretValue": {
+      "Type": "Task",
+      "Parameters": {
+        "SecretId.$": "$.mediaPackagePackagingGroup.Authorization.CdnIdentifierSecret"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:secretsmanager:getSecretValue",
+      "Next": "Process MediaPackage VOD Packaging Configuration Asset",
+      "ResultPath": "$.PackagingGroupAuthHeader"
+    },
+    "Check exception type": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.describeVodAssetException.Error",
+          "StringMatches": "MediaPackageVod.NotFoundException",
+          "Next": "MediaPackage VOD Asset Does Not Exist"
+        }
+      ],
+      "Default": "Unexpected exception when retrieving MediaPackage VOD Asset"
+    },
+    "MediaPackage VOD Asset Does Not Exist": {
+      "Type": "Pass",
+      "Next": "List objects in destination location"
+    },
+    "Unexpected exception when retrieving MediaPackage VOD Asset": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "Message": {
+          "Type": "ERROR",
+          "Message.$": "States.Format('Unexpected exception when retrieving MediaPackage VOD Asset: ', $.Cause)"
+        },
+        "TopicArn": "${SNS_TOPIC}"
+      },
+      "InputPath": "$.createAssetRequest",
+      "Next": "Unexpected error when retrieving MediaPackage VOD Asset"
+    },
+    "Unexpected error when retrieving MediaPackage VOD Asset": {
+      "Type": "Fail"
+    },
+    "List objects in destination location": {
+      "Type": "Task",
+      "Next": "Choice",
+      "Parameters": {
+        "Bucket.$": "$.DestinationBucket",
+        "Prefix.$": "States.Format('{}/{}', $.DestinationPath, $.Id)",
+        "MaxKeys": 10
+      },
+      "Resource": "arn:aws:states:::aws-sdk:s3:listObjectsV2",
+      "InputPath": "$.createAssetRequest",
+      "ResultPath": "$.preexistingS3Objects"
+    },
+    "Choice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Not": {
+            "Variable": "$.preexistingS3Objects.KeyCount",
+            "NumericEquals": 0
+          },
+          "Next": "S3 Objects already exist in destination path"
+        }
+      ],
+      "Default": "CreateAsset"
+    },
+    "S3 Objects already exist in destination path": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "Message": {
+          "Type": "ERROR",
+          "Message.$": "States.Format('S3 Objects already exist in destination path. Destination Path: s3://{}/{}/{}', $.DestinationBucket, $.DestinationPath, $.Id)",
+          "Id.$": "$.Id"
+        },
+        "TopicArn": "${SNS_TOPIC}"
+      },
+      "Next": "S3 Objects already exist in S3 destination",
+      "InputPath": "$.createAssetRequest"
+    },
+    "S3 Objects already exist in S3 destination": {
+      "Type": "Fail"
+    },
+    "CreateAsset": {
+      "Type": "Task",
+      "Parameters": {
+        "Id.$": "$.Id",
+        "PackagingGroupId.$": "$.PackagingGroupId",
+        "SourceArn.$": "$.SourceArn",
+        "SourceRoleArn.$": "$.SourceRoleArn"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:mediapackagevod:createAsset",
+      "Next": "DescribePackagingGroup",
+      "InputPath": "$.createAssetRequest",
+      "ResultPath": "$.mediaPackageVodAsset",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.CreateAssetError",
+          "Comment": "Failed to create MediaPackage VOD asset",
+          "Next": "Create MediaPackage VOD Asset Failure Notification"
+        }
+      ]
+    },
+    "Create MediaPackage VOD Asset Failure Notification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "Message.$": "$",
+        "TopicArn": "${SNS_TOPIC}"
+      },
+      "Next": "Failed to create MediaPackage VOD asset",
+      "ResultPath": null
+    },
+    "Failed to create MediaPackage VOD asset": {
+      "Type": "Fail"
+    },
+    "Process MediaPackage VOD Packaging Configuration Asset": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "Get existing objects for endpoint",
+        "States": {
+          "Get existing objects for endpoint": {
+            "Type": "Task",
+            "Next": "Check if endpoint has previously been downloaded",
+            "Parameters": {
+              "Bucket.$": "$.createAssetRequest.DestinationBucket",
+              "Prefix.$": "States.Format('{}/{}/{}', $.createAssetRequest.DestinationPath, $.createAssetRequest.Id, $.EgressEndpointPackagingConfigurationId)",
+              "MaxKeys": 1
+            },
+            "Resource": "arn:aws:states:::aws-sdk:s3:listObjectsV2",
+            "ResultPath": "$.preexistingS3ObjectsForEndpoint"
+          },
+          "Check if endpoint has previously been downloaded": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.preexistingS3ObjectsForEndpoint.KeyCount",
+                "NumericGreaterThan": 0,
+                "Next": "Pass skipped asset details"
+              }
+            ],
+            "Default": "Read initial Endpoint Status"
+          },
+          "Pass skipped asset details": {
+            "Type": "Pass",
+            "Next": "MediaPackage VOD Asset Endpoint Skipped",
+            "ResultPath": "$.skipped.asset",
+            "Comment": "Adds information about the skipped asset to the output",
+            "Parameters": {
+              "packagingConfiguration.$": "$.EgressEndpointPackagingConfigurationId",
+              "status": "SKIPPED",
+              "message": "Content for endpoint already exists. If endpoint needs to be downloaded again previously downloaded content must be removed."
+            }
+          },
+          "MediaPackage VOD Asset Endpoint Skipped": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "Message.$": "$",
+              "TopicArn": "${SNS_TOPIC}"
+            },
+            "ResultPath": null,
+            "End": true
+          },
+          "Read initial Endpoint Status": {
+            "Type": "Pass",
+            "Next": "Check if packaging configuration has completed processing",
+            "Parameters": {
+              "EgressEndpoint.$": "$..EgressEndpoints[?(@.PackagingConfigurationId == $.EgressEndpointPackagingConfigurationId)]"
+            },
+            "ResultPath": "$.MapIteratorData"
+          },
+          "Check if packaging configuration has completed processing": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.MapIteratorData.EgressEndpoint[0].Status",
+                "StringEquals": "PLAYABLE",
+                "Next": "Initiating Asset Download Notification"
+              },
+              {
+                "Or": [
+                  {
+                    "Variable": "$.MapIteratorData.EgressEndpoint[0].Status",
+                    "StringEquals": "QUEUED"
+                  },
+                  {
+                    "Variable": "$.MapIteratorData.EgressEndpoint[0].Status",
+                    "StringEquals": "PROCESSING"
+                  }
+                ],
+                "Next": "Wait"
+              }
+            ],
+            "Default": "MediaPackage VOD Asset Endpoint in unknown state"
+          },
+          "MediaPackage VOD Asset Endpoint in unknown state": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "Message.$": "$",
+              "TopicArn": "${SNS_TOPIC}"
+            },
+            "Next": "Failed to process endpoint for packaging configuration",
+            "ResultPath": null
+          },
+          "Failed to process endpoint for packaging configuration": {
+            "Type": "Fail"
+          },
+          "Initiating Asset Download Notification": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "Message": {
+                "Type": "NOTIFICATION",
+                "Message": "Initiating download of egress endpoint",
+                "EgressEndpoint.$": "$..EgressEndpoints[?(@.PackagingConfigurationId == $.EgressEndpointPackagingConfigurationId)]"
+              },
+              "TopicArn": "${SNS_TOPIC}"
+            },
+            "Next": "Download Asset",
+            "ResultPath": null
+          },
+          "Download Asset": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "${VOD_DOWNLOAD_LAMBDA}",
+              "Payload": {
+                "numThreads": 20,
+                "destination_bucket.$": "$.createAssetRequest.DestinationBucket",
+                "destination_path.$": "$.createAssetRequest.DestinationPath",
+                "packaging_config.$": "$.MapIteratorData.EgressEndpoint[0].PackagingConfigurationId",
+                "packaging_group_auth_header.$": "$.PackagingGroupAuthHeader.SecretString",
+                "asset_id.$": "$.createAssetRequest.Id",
+                "verbose": true,
+                "remove_ad_content": false,
+                "make_public": false,
+                "source_url.$": "$.MapIteratorData.EgressEndpoint[0].Url",
+                "rpsLimit": 20
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 6,
+                "BackoffRate": 2
+              }
+            ],
+            "ResultPath": "$.lambdaResponse",
+            "Next": "Check if asset successfully downloaded"
+          },
+          "Check if asset successfully downloaded": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.lambdaResponse.Payload.result.status",
+                "StringEquals": "COMPLETE",
+                "Next": "Download complete"
+              },
+              {
+                "Variable": "$.lambdaResponse.Payload.result.status",
+                "StringEquals": "LAMBDA_TIMEOUT",
+                "Next": "Restart lambda as it reached timeout"
+              }
+            ],
+            "Default": "Download failed"
+          },
+          "Download failed": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "TopicArn": "${SNS_TOPIC}",
+              "Message": {
+                "Type": "ERROR",
+                "Message": "Failed to download asset from endpoint",
+                "EgressEndpoint.$": "$..EgressEndpoints[?(@.PackagingConfigurationId == $.EgressEndpointPackagingConfigurationId)]",
+                "DebugInfo.$": "$"
+              }
+            },
+            "Next": "Failed to download asset",
+            "ResultPath": null
+          },
+          "Download complete": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "TopicArn": "${SNS_TOPIC}",
+              "Message": {
+                "Type": "NOTIFICATION",
+                "Message": "Download Complete",
+                "ProgressUpdate.$": "$.lambdaResponse.Payload.result",
+                "Asset.$": "$.lambdaResponse.Payload.asset"
+              }
+            },
+            "Next": "Asset Successfully Downloaded",
+            "ResultPath": null
+          },
+          "Asset Successfully Downloaded": {
+            "Type": "Succeed"
+          },
+          "Failed to download asset": {
+            "Type": "Fail"
+          },
+          "Wait": {
+            "Type": "Wait",
+            "Seconds": 15,
+            "Next": "DescribeAsset"
+          },
+          "DescribeAsset": {
+            "Type": "Task",
+            "Next": "Read latest Endpoint Status",
+            "Parameters": {
+              "Id.$": "$.mediaPackageVodAsset.Id"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:mediapackagevod:describeAsset",
+            "ResultPath": "$.mediaPackageVodAsset"
+          },
+          "Read latest Endpoint Status": {
+            "Type": "Pass",
+            "Next": "Check if packaging configuration has completed processing",
+            "ResultPath": "$.MapIteratorData",
+            "Parameters": {
+              "EgressEndpoint.$": "$..EgressEndpoints[?(@.PackagingConfigurationId == $.EgressEndpointPackagingConfigurationId)]"
+            }
+          },
+          "Restart lambda as it reached timeout": {
+            "Type": "Pass",
+            "Next": "Download progress update",
+            "ResultPath": null
+          },
+          "Download progress update": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sns:publish",
+            "Parameters": {
+              "TopicArn": "${SNS_TOPIC}",
+              "Message": {
+                "Type": "NOTIFICATION",
+                "Message": "Restarting lambda as it reached timeout",
+                "ProgressUpdate.$": "$.lambdaResponse.Payload.result"
+              }
+            },
+            "Next": "Download Asset",
+            "ResultPath": null
+          }
+        }
+      },
+      "ItemsPath": "$.mediaPackageVodAsset.EgressEndpoints",
+      "MaxConcurrency": 0,
+      "Parameters": {
+        "createAssetRequest.$": "$.createAssetRequest",
+        "mediaPackageVodAsset.$": "$.mediaPackageVodAsset",
+        "PackagingGroupAuthHeader.$": "$.PackagingGroupAuthHeader",
+        "EgressEndpointPackagingConfigurationId.$": "$$.Map.Item.Value.PackagingConfigurationId"
+      },
+      "Next": "VOD Download Complete",
+      "ResultPath": "$.DownloadAssetResults"
+    },
+    "VOD Download Complete": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SNS_TOPIC}",
+        "Message": {
+          "Type": "NOTIFICATION",
+          "downloadedAssets.$": "$.DownloadAssetResults..asset"
+        }
+      },
+      "Next": "Success",
+      "ResultPath": null
+    },
+    "Success": {
+      "Type": "Succeed"
+    }
+  }
+}
