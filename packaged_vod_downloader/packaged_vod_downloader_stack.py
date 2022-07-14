@@ -254,15 +254,17 @@ class PackagedVodDownloaderStack(Stack):
         # Allow state machine to access secret from secrets manager
         # This is to allow the role to retrieve the secret used to secure the packaging configuration endpoints
         # with CDN Auth
-        if mediaPackageCdnAuthSecretArn:
-            stepFunctionRole.add_to_policy(iam.PolicyStatement(
-                actions=[
-                    "secretsmanager:GetSecretValue"
-                ],
-                resources=[
-                    mediaPackageCdnAuthSecretArn
-                ]
-            ))
+        # TODO: Need to implement conditional logic to optionalling include support for CdnAuth
+        # This implementaion is not currently working.
+        # if not cdnAuthDisabled:
+        #     stepFunctionRole.add_to_policy(iam.PolicyStatement(
+        #         actions=[
+        #             "secretsmanager:GetSecretValue"
+        #         ],
+        #         resources=[
+        #             mediaPackageCdnAuthSecretArn
+        #         ]
+        #     ))
 
         return stepFunctionRole
 
