@@ -39,6 +39,8 @@ To get the demo running in your own AWS account, follow these instructions.
 
 ## Deployment
 
+** NOTE: If using an EC2 for deployment ensure the instance has sufficient resources. During testing issues were observed when performing a deploy on an instance smaller than a t2.small with 2GB RAM **
+
 This reference template deploys the Packaged VOD Downloader to the default AWS account.
 
 This project is set up like a standard Python project.  The initialization
