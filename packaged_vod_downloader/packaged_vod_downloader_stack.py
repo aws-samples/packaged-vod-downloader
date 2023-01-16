@@ -109,10 +109,31 @@ class PackagedVodDownloaderStack(Stack):
         cfn_state_machine.add_depends_on(stepFunctionRole.node.default_child)
         cfn_state_machine.add_depends_on(stepFunctionPolicy.node.default_child)
 
-        # Aspects.of(self).add(AwsSolutionsChecks())
-        # NagSuppressions.addStackSuppressions(Stack, [
-        #     { id: 'AwsSolutions-S1', reason: 'lorem ipsum' },
-        # ]);
+        Aspects.of(self).add(AwsSolutionsChecks())
+        NagSuppressions.add_resource_suppressions( destinationBucket, [
+            {
+                "id": "AwsSolutions-S1",
+                "reason": "Bucket is restricted to only allow prinipals access. Logging is not required."
+            }
+        ])
+        NagSuppressions.add_resource_suppressions (vodDownloadLambdaRole, [
+            {
+                "id": "AwsSolutions-IAM5",
+                "reason": "Wildcard required in IAM role to write logs to CloudWatch, write to the destination path in S3 Bucket and access all MediaPackage-VOD Assets."
+            }
+        ], apply_to_children=True)
+        NagSuppressions.add_resource_suppressions (stepFunctionPolicy, [
+            {
+                "id": "AwsSolutions-IAM5",
+                "reason": "State Machine needs to be able to access the MediaPackage Packaging Groups and Assets specified in the input. This requires a wildcard."
+            }
+        ])
+        NagSuppressions.add_resource_suppressions (cfn_state_machine, [
+            {
+                "id": "AwsSolutions-SF1",
+                "reason": "########## TODO ##########: Unable to configure logging on state machine using CDK. Further investigation required as this is most likely a defect."
+            }
+        ])
 
 
     def createS3Bucket(self, resourceName):
