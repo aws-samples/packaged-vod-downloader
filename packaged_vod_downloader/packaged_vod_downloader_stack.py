@@ -86,7 +86,8 @@ class PackagedVodDownloaderStack(Stack):
                                         )
 
         # Create role for Step Function Execution
-        stepFunctionRole = self.createStepFunctionRole( notificationTopic, vodDownloadLambda, destinationBucket, mediaPackageRole, masterKmsKey, mediaPackageCdnAuthSecretArn )
+        stateMachineName = "PackagedVodDownloaderStateMachine"
+        ( stepFunctionRole, stepFunctionPolicy) = self.createStepFunctionRole( stateMachineName, notificationTopic, vodDownloadLambda, destinationBucket, mediaPackageRole, masterKmsKey, mediaPackageCdnAuthSecretArn )
 
         # Read State Machine definition file into string
         workflowDefinition = Path('packaged_vod_downloader/statemachine/vodDownloaderWorkflow.json').read_text()
@@ -99,12 +100,14 @@ class PackagedVodDownloaderStack(Stack):
                 "SNS_TOPIC": notificationTopic.topic_arn,
                 "VOD_DOWNLOAD_LAMBDA": vodDownloadLambda.function_name
             },
-            state_machine_name="PackagedVodDownloaderStateMachine",
+            state_machine_name=stateMachineName,
             state_machine_type="STANDARD",
             tracing_configuration=stepfunctions.CfnStateMachine.TracingConfigurationProperty(
                 enabled=True
             )
         )
+        cfn_state_machine.add_depends_on(stepFunctionRole.node.default_child)
+        cfn_state_machine.add_depends_on(stepFunctionPolicy.node.default_child)
 
         # Aspects.of(self).add(AwsSolutionsChecks())
         # NagSuppressions.addStackSuppressions(Stack, [
@@ -181,75 +184,80 @@ class PackagedVodDownloaderStack(Stack):
         return vodDownloadLambdaRole
     
 
-    def createStepFunctionRole(self, notificationTopic, vodDownloadLambda, destinationBucket, mediaPackageRole, masterKmsKey, mediaPackageCdnAuthSecretArn):
+    def createStepFunctionRole(self, stateMachineName, notificationTopic, vodDownloadLambda, destinationBucket, mediaPackageRole, masterKmsKey, mediaPackageCdnAuthSecretArn):
         stepFunctionRole = iam.Role(self, "StateMachineRole",
             assumed_by=iam.ServicePrincipal("states.amazonaws.com")
         )
-        
-        # Allow read access to all S3 buckets
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=["s3:ListBucket"],
-            resources=[ destinationBucket.bucket_arn ]
-        ))
-        # Allow access to MediaPackage VOD
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=[
-                "mediapackage-vod:CreateAsset",
-                "mediapackage-vod:DeleteAsset",
-                "mediapackage-vod:DescribeAsset"
-                ],
-            resources=[ "arn:aws:mediapackage-vod:%s:%s:assets/*" % (self.region, self.account) ]
-        ))
-        # Allow access to MediaPackage VOD Packaging Groups
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=[
-                "mediapackage-vod:DescribePackagingGroup"
-                ],
-            resources=[ "arn:aws:mediapackage-vod:%s:%s:packaging-groups/*" % (self.region, self.account) ]
-        ))
 
-        # Allow access to CloudWatch for logging
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=[
-                "logs:CreateLogStream",
-                "logs:CreateLogGroup",
-                "logs:PutLogEvents"
-                ],
-            resources=[ "arn:aws:logs:%s:%s:/aws/lambda/%s" % (self.region, self.account, vodDownloadLambda.function_name) ]
-        ))
-        # Allow State Machine to assume role passed into execution
-        # Generally, it is expected this would be the MediaPackage_Default_Role
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=["iam:PassRole"],
-            resources=[
-                "arn:aws:iam::%s:role/%s" % (self.account, mediaPackageRole)
+        stepFunctionPolicy = iam.Policy(self, "StateMachinePolicy",
+            statements=[
+                # Allow read access to all S3 buckets
+                iam.PolicyStatement(
+                    actions=["s3:ListBucket"],
+                    resources=[ destinationBucket.bucket_arn ]
+                ),
+                # Allow access to MediaPackage VOD
+                iam.PolicyStatement(
+                    actions=[
+                        "mediapackage-vod:CreateAsset",
+                        "mediapackage-vod:DeleteAsset",
+                        "mediapackage-vod:DescribeAsset"
+                        ],
+                    resources=[ "arn:aws:mediapackage-vod:%s:%s:assets/*" % (self.region, self.account) ]
+                ),
+                # Allow access to MediaPackage VOD Packaging Groups
+                iam.PolicyStatement(
+                    actions=[
+                        "mediapackage-vod:DescribePackagingGroup"
+                        ],
+                    resources=[ "arn:aws:mediapackage-vod:%s:%s:packaging-groups/*" % (self.region, self.account) ]
+                ),
+                # Allow access to CloudWatch for logging
+                iam.PolicyStatement(
+                    actions=[
+                        "logs:CreateLogStream",
+                        "logs:CreateLogGroup",
+                        "logs:PutLogEvents"
+                        ],
+                    resources=[ "arn:aws:logs:%s:%s:/aws/lambda/%s" % (self.region, self.account, vodDownloadLambda.function_name) ]
+                ),
+                # Allow State Machine to assume role passed into execution
+                # Generally, it is expected this would be the MediaPackage_Default_Role
+                iam.PolicyStatement(
+                    actions=["iam:PassRole"],
+                    resources=[
+                        "arn:aws:iam::%s:role/%s" % (self.account, mediaPackageRole)
+                    ]
+                ),
+                # Allow State Machine to publish to SNS Topic
+                iam.PolicyStatement(
+                    actions=["sns:Publish"],
+                    resources=[
+                        notificationTopic.topic_arn
+                    ]
+                ),
+                # Allow State Machine to invoke Lambda Function
+                # Required to execute VOD download function
+                iam.PolicyStatement(
+                    actions=["lambda:InvokeFunction"],
+                    resources=[
+                        vodDownloadLambda.function_arn
+                    ]
+                ),
+                # Allow state machine to create a KMS Data Key
+                iam.PolicyStatement(
+                    actions=[
+                        "kms:GenerateDataKey",
+                        "kms:Decrypt"
+                    ],
+                    resources=[
+                        "arn:aws:kms:%s:%s:key/%s" % (self.region, self.account, masterKmsKey.key_id)
+                    ]
+                )
             ]
-        ))
-        # Allow State Machine to publish to SNS Topic
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=["sns:Publish"],
-            resources=[
-                notificationTopic.topic_arn
-            ]
-        ))        
-        # Allow State Machine to invoke Lambda Function
-        # Required to execute VOD download function
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=["lambda:InvokeFunction"],
-            resources=[
-                vodDownloadLambda.function_arn
-            ]
-        ))
-        # Allow state machine to create a KMS Data Key
-        stepFunctionRole.add_to_policy(iam.PolicyStatement(
-            actions=[
-                "kms:GenerateDataKey",
-                "kms:Decrypt"
-            ],
-            resources=[
-                "arn:aws:kms:%s:%s:key/%s" % (self.region, self.account, masterKmsKey.key_id)
-            ]
-        ))
+        )
+
+        stepFunctionRole.attach_inline_policy(stepFunctionPolicy)
 
         # Allow state machine to access secret from secrets manager
         # This is to allow the role to retrieve the secret used to secure the packaging configuration endpoints
@@ -266,7 +274,7 @@ class PackagedVodDownloaderStack(Stack):
         #         ]
         #     ))
 
-        return stepFunctionRole
+        return ( stepFunctionRole, stepFunctionPolicy )
 
 
 def generateRandomString(length):
