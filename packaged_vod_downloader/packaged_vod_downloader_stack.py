@@ -104,7 +104,20 @@ class PackagedVodDownloaderStack(Stack):
             state_machine_type="STANDARD",
             tracing_configuration=stepfunctions.CfnStateMachine.TracingConfigurationProperty(
                 enabled=True
-            )
+            ),
+            ## TODO: Commented out logging configuration as this is causing the following error:
+            #        "Service: AWSStepFunctions; Status Code: 400; Error Code: InvalidLoggingConfiguration"
+            # logging_configuration=stepfunctions.CfnStateMachine.LoggingConfigurationProperty(
+            #     destinations=[
+            #         stepfunctions.CfnStateMachine.LogDestinationProperty(
+            #             cloud_watch_logs_log_group=stepfunctions.CfnStateMachine.CloudWatchLogsLogGroupProperty(
+            #                 log_group_arn="arn:aws:logs:%s:%s:log-group:/aws/vendedlogs/states/%s:*" % (self.region, self.account, stateMachineName)
+            #             )
+            #         )
+            #     ],
+            #     include_execution_data=False,
+            #     level="ALL"
+            # )
         )
         cfn_state_machine.add_depends_on(stepFunctionRole.node.default_child)
         cfn_state_machine.add_depends_on(stepFunctionPolicy.node.default_child)
