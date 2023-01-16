@@ -3,6 +3,7 @@ from aws_cdk import (
     Aspects,
     Duration,
     Stack,
+    CfnOutput,
     CfnParameter,
     RemovalPolicy,
     aws_kms as kms,
@@ -121,6 +122,8 @@ class PackagedVodDownloaderStack(Stack):
         )
         cfn_state_machine.add_depends_on(stepFunctionRole.node.default_child)
         cfn_state_machine.add_depends_on(stepFunctionPolicy.node.default_child)
+
+        CfnOutput(self, "StateMachineArn", value=cfn_state_machine.attr_arn)
 
         Aspects.of(self).add(AwsSolutionsChecks())
         NagSuppressions.add_resource_suppressions( destinationBucket, [
