@@ -425,7 +425,7 @@ def listObjectsAtDestination( s3Resource, destBucket, destPath, assetId, packagi
   
 
   # Determine path where objects are stored
-  prefix="%s/%s" % (assetId, packagingConfig)
+  prefix="%s/%s/" % (assetId, packagingConfig)
   if destPath is not None:
     prefix="%s/%s" % (destPath, prefix)
 
