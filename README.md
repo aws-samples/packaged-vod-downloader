@@ -173,7 +173,6 @@ To start an execution via the console:
 1. Enter execution input into the input field and click 'Start Execution'
 
 # Known Limitations
-1. DASH Download Fails if stream contains JPG thumbnails - Enhancements required to download script
 
 ## Security
 

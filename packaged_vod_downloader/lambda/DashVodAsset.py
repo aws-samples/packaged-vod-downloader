@@ -17,6 +17,8 @@
 from mpegdash.parser import MPEGDASHParser
 import os
 import urllib3
+from isodate import parse_duration
+from datetime import datetime
 from pprint import pprint
 from urllib.parse import urlparse
 
@@ -67,7 +69,7 @@ class DashVodAsset:
 
         print("Starting processing AdaptationSet %d with MimeType '%s'" % (adaptationSetCounter, adaptationSet.mime_type))
         
-        listOfSegments = getAdaptationSetSegmentList(mpdBaseUrl, adaptationSet)
+        listOfSegments = getAdaptationSetSegmentList(mpdBaseUrl, adaptationSet, period)
         mediaSegments.extend(listOfSegments)
       
         print("Finished processing AdaptationSet %d." % adaptationSetCounter)
@@ -128,7 +130,7 @@ def normaliseUrl( url ):
   return absUrl
 
 
-def getAdaptationSetSegmentList(mpdBaseUrl, adaptationSet):
+def getAdaptationSetSegmentList(mpdBaseUrl, adaptationSet, period):
 
   mediaSegments = []
   
@@ -136,16 +138,12 @@ def getAdaptationSetSegmentList(mpdBaseUrl, adaptationSet):
     print("Processing Representation %s:" % representation.id)
 
     # Get segment Template
-    # Segment template may be defined in representation
-    # or at the Adaptation set level
+    # Segment template may be defined in representation or at the Adaptation set level
     segmentTemplates = None
-    segmentTemplateSource = None
-    if not( representation.segment_templates is None ):
+    if representation.segment_templates:
       segmentTemplates = representation.segment_templates
-      segmentTemplateSource = 'representation'
-    elif not( adaptationSet.segment_templates is None ):
+    elif adaptationSet.segment_templates:
       segmentTemplates = adaptationSet.segment_templates
-      segmentTemplateSource = 'adaptationSet'
     else:
       print("Unable to find Segment Template for Representation %s" % representation.id)
       exit(1)
@@ -155,27 +153,47 @@ def getAdaptationSetSegmentList(mpdBaseUrl, adaptationSet):
       print("Unsupported DASH Manifest format. Maximum of one segment template per adaptations set")
       exit(2)
 
+    ############################
+    # Process Media Files
+    ############################
+
+    # Extract Media Segment template and fill in any required parameters (e.g. representation id)
     segmentTemplate = segmentTemplates[0]
     mediaSegmentTemplate = segmentTemplate.media
-    initSegmentTemplate = segmentTemplate.initialization
-    startNumber = segmentTemplate.start_number
-
-    # Representation ID needs to be substituted if the init and media templates if sourced from adaptation set
-    if segmentTemplateSource == 'adaptationSet':
+    if "$RepresentationID$" in mediaSegmentTemplate:
       mediaSegmentTemplate = mediaSegmentTemplate.replace("$RepresentationID$", str(representation.id))
-      initSegmentTemplate = initSegmentTemplate.replace("$RepresentationID$", str(representation.id))
-
     print("Media Segment Template: %s" % mediaSegmentTemplate)
-    print("Init Segment Template: %s" % initSegmentTemplate)
 
-    mediaSegmentTimes = getSegmentTimeline( segmentTemplate )
+    # Generate a list of media files to be downloaded
+    # Segment Templates do not exist for some renditions (e.g. 'image/jpeg')
+    # For these renditions a segment timeline is inferred from the SegmentTemplate
+    mediaSegmentTimes = None
+    if segmentTemplate.segment_timelines:
+      mediaSegmentTimes = getSegmentTimeline( segmentTemplate )
+    else:
+      mediaSegmentTimes = getInferredSegmentTimeline( segmentTemplate.start_number, segmentTemplate.timescale, segmentTemplate.duration, period.duration )
 
-    mediaSegmentsForRepresentation = getMediaSegmentList( mediaSegmentTemplate, startNumber, mediaSegmentTimes, mpdBaseUrl )
+    mediaSegmentsForRepresentation = getMediaSegmentList( mediaSegmentTemplate, segmentTemplate.start_number, mediaSegmentTimes, mpdBaseUrl )
 
-    # Add init file to resource list
-    absInitSegmentTemplate = normaliseUrl(mpdBaseUrl + '/' + initSegmentTemplate)
-    mediaSegmentsForRepresentation.append(absInitSegmentTemplate)
+    ############################
+    # Process Init File (it exists for this rendition)
+    ############################
+    if segmentTemplate.initialization:
 
+      # Extract init segment template and fill in any required parameters (e.g. representation id)
+      initSegmentTemplate = segmentTemplate.initialization
+      if "$RepresentationID$" in initSegmentTemplate:
+        initSegmentTemplate = initSegmentTemplate.replace("$RepresentationID$", str(representation.id))
+      print("Init Segment Template: %s" % initSegmentTemplate)
+      # Add init file to resource list
+      absInitSegmentTemplate = normaliseUrl(mpdBaseUrl + '/' + initSegmentTemplate)
+
+      # Append init files to list of media files to be downloaded
+      mediaSegmentsForRepresentation.append(absInitSegmentTemplate)
+    else:
+      print("Skipping init file as there is no init for '%s' representation" % representation.id)
+
+    # Append list of files to be downloaded as part of this adaptation set
     mediaSegments.extend(mediaSegmentsForRepresentation)
 
   return mediaSegments
@@ -226,3 +244,23 @@ def getSegmentTimeline( segmentTemplate ):
         mediaSegmentTimes.append(t + x*d)
 
   return mediaSegmentTimes
+
+# Infers a segment timeline if not explicitly defined
+def getInferredSegmentTimeline( startNumber, timescale, segmentTemplateDuration, periodDuration ):
+
+  # Approach used here is to calculate segment size (i.e. segment template duration divided by timescale)
+  # Dividing the duration of the period by the segment size should give the correct number of assets
+
+  # Calculate segement size
+  segmentSize = float(segmentTemplateDuration)/float(timescale)
+
+  # Get period duration
+  periodDuration = parse_duration(periodDuration).total_seconds()
+
+  # Calculcate number of segments in period
+  numberSegments = int(periodDuration / segmentSize)
+
+  # Create array listing the segment numbers
+  segmentTimelineNumbers = list(range(startNumber, startNumber+numberSegments))
+
+  return segmentTimelineNumbers
