@@ -124,6 +124,8 @@ class PackagedVodDownloaderStack(Stack):
         cfn_state_machine.add_depends_on(stepFunctionPolicy.node.default_child)
 
         CfnOutput(self, "StateMachineArn", value=cfn_state_machine.attr_arn)
+        CfnOutput(self, "DestinationBucketName", value=destinationBucket.bucket_name)
+
 
         Aspects.of(self).add(AwsSolutionsChecks())
         NagSuppressions.add_resource_suppressions( destinationBucket, [
@@ -248,15 +250,6 @@ class PackagedVodDownloaderStack(Stack):
                         "mediapackage-vod:DescribePackagingGroup"
                         ],
                     resources=[ "arn:aws:mediapackage-vod:%s:%s:packaging-groups/*" % (self.region, self.account) ]
-                ),
-                # Allow access to CloudWatch for logging
-                iam.PolicyStatement(
-                    actions=[
-                        "logs:CreateLogStream",
-                        "logs:CreateLogGroup",
-                        "logs:PutLogEvents"
-                        ],
-                    resources=[ "arn:aws:logs:%s:%s:/aws/lambda/%s" % (self.region, self.account, vodDownloadLambda.function_name) ]
                 ),
                 # Allow State Machine to assume role passed into execution
                 # Generally, it is expected this would be the MediaPackage_Default_Role
