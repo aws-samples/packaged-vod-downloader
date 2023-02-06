@@ -86,9 +86,15 @@ class DashVodAsset:
     allSegments = list(mediaSegments)
     allSegments.append(self.masterManifest)
 
-    self.commonPrefix =  os.path.commonprefix( allSegments )
+    # Duplicates need to be removed from the list of all segments. Duplicate can occur when processing multiperiod DASH
+    # streams where the init file does not change across period boundaries. To do this the list of segments will be
+    # converted to a set and then back to a list.
+    allSegmentsSet = set(allSegments)
+    uniqueSegments = list(allSegmentsSet)
+
+    self.commonPrefix =  os.path.commonprefix( uniqueSegments )
     self.mediaSegmentList = mediaSegments
-    self.allResources = allSegments
+    self.allResources = uniqueSegments
 
     return
 
