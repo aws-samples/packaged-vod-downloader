@@ -63,8 +63,14 @@ class HlsVodAsset:
     allResources = [ self.masterManifest ]
     allResources.extend(self.variantManifests)
     allResources.extend(self.mediaSegmentList)
-    self.allResources = allResources
-    self.commonPrefix = os.path.commonprefix( allResources )
+
+    # Duplicates need to be removed from the list of all segments.
+    # This may not strictly be necessary for HLS/CMAF streams but cannot hurt.
+    allResourcesSet = set(allResources)
+    uniqueResources = list(allResourcesSet)
+
+    self.allResources = uniqueResources
+    self.commonPrefix = os.path.commonprefix( uniqueResources )
 
     return
 
