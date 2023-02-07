@@ -207,7 +207,9 @@ def fetchStream(event, context):
   masterManifestUrl           = event['source_url']
   destBucket                  = event['destination_bucket']
   packagingConfig             = event['packaging_config']
-  packaging_group_auth_header = event['packaging_group_auth_header']
+  packaging_group_auth_header = None
+  if 'packaging_group_auth_header' in event.keys():
+    packaging_group_auth_header = event['packaging_group_auth_header']
   rpsLimit          = event['rpsLimit']
   acl               = 'private'
   numThreads        = 5
@@ -364,7 +366,7 @@ def queueObjectsToFetch(preExistingObjects, allResources, commonPrefix, fetchQ, 
   for object in allResources:
     
     # Strip commonPrefix from URL to compare with S3 Key
-    objectKey = '/' + object.replace(commonPrefix, "")
+    objectKey = object.replace(commonPrefix, "")
 
     if context:
       if context.get_remaining_time_in_millis() < LAMBDA_MIN_TIME_REMAINING_TRIGGER:
@@ -401,16 +403,17 @@ def parseVodAssetManifests( assetUrl, authHeaders ):
   # Returns a data structure containing the parse information and
   # the type of asset
 
+  parsedUrl = urlparse(assetUrl)
   vodAsset                  = None
-  if assetUrl.endswith('.m3u8'):
+  if parsedUrl.path.endswith('.m3u8'):
     vodAssetType = 'hls'
     vodAsset = HlsVodAsset(assetUrl, authHeaders)
 
 
-  elif assetUrl.endswith('.mpd'):
+  elif parsedUrl.path.endswith('.mpd'):
     vodAssetType = 'dash'
     vodAsset = DashVodAsset(assetUrl, authHeaders)
-  
+
   else:
     vodAssetType = 'UnsupportedFormat'
 
@@ -515,7 +518,8 @@ def parseCmdLine():
   # List of tuples:  (option, dispname, type, action, helptext, required)
   
   argdefs.append(('-o', 'URL', str, 'store', 'URL for HLS endpoint on origin server', True))
-  argdefs.append(('-d', 'bucket', str, 'store', 'Destination S3 bucket name', True))
+  argdefs.append(('-b', 'bucket', str, 'store', 'Destination S3 bucket name', True))
+  argdefs.append(('-d', 'path', str, 'store', 'Destination path', True))
   argdefs.append(('-p', 'packaging-config', str, 'store', 'Packaging Configuration name', True))
   argdefs.append(('-a', 'Asset-ID', str, 'store', 'Asset ID (S3 filename prefix, should end in /)', True))
   argdefs.append(('-r', None, None, 'store_true', 'Removes ad content, leaving markers intact', False))
@@ -531,11 +535,12 @@ def parseCmdLine():
   event = {}
   
   event['source_url']         = args.o
-  event['destination_bucket'] = args.d
+  event['destination_bucket'] = args.b
   event['packaging_config']   = args.p
   event['asset_id']           = args.a
   event['numThreads']         = 5
   event['rpsLimit']           = 1000
+  event['destination_path']   = args.d
 
   return event
 
