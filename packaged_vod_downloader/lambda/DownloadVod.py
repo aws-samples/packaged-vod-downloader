@@ -420,6 +420,12 @@ def listObjectsAtDestination( s3Resource, destBucket, destPath ):
   # which assets we can skip in the event of a restart or when using the 
   # 'continue' feature when hosted by Lambda
 
+  # Need to add a '/' to the end of destPath to ensure objects being counted are all under the
+  # same directly. Without this the method could count objected from another packaging
+  # configuration which starts with the same characters (e.g. dash_compact_time and
+  # dash_compact_time_iframeonly )
+  destPath = destPath + '/'
+
   existingObjects = []
 
   logger.info("Checking for object with prefix: s3://%s/%s" % (destBucket, destPath))
