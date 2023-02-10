@@ -18,6 +18,7 @@ import os
 import urllib3
 from pprint import pprint
 from urllib.parse import urlparse
+import re
 
 http = urllib3.PoolManager()
 
@@ -70,7 +71,20 @@ class HlsVodAsset:
     uniqueResources = list(allResourcesSet)
 
     self.allResources = uniqueResources
-    self.commonPrefix = os.path.commonprefix( uniqueResources )
+
+    # Set common prefix
+    # The common prefix must end with '/' to indicate this is a path and does not include
+    # the start of the name of the files. For example, if all the resources of an asset start
+    # with 'asset1' and the content is stored in 'my/asset/path' the common prefix should be
+    # 'my/asset/path/' not 'my/asset/path/asset1'
+    commonPrefix = os.path.commonprefix( uniqueResources )
+    if not commonPrefix.endswith('/'):
+      # Strip off anything to the right of the last '/' because this component represents
+      # the common string at the start of the filenames
+      unwantedPathSuffix = os.path.basename(commonPrefix)
+      pathSuffix = re.compile( unwantedPathSuffix + '$' )
+      commonPrefix = pathSuffix.sub('', commonPrefix)
+    self.commonPrefix = commonPrefix
 
     return
 
