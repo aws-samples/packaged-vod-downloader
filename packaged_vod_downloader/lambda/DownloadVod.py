@@ -507,7 +507,7 @@ def parseCmdLine():
   
   # List of tuples:  (option, dispname, type, action, helptext, required)
   
-  argdefs.append(('-o', 'URL', str, 'store', 'URL for HLS endpoint on origin server', True))
+  argdefs.append(('-i', 'URL', str, 'store', 'URL for HLS endpoint on origin server', True))
   argdefs.append(('-b', 'bucket', str, 'store', 'Destination S3 bucket name', True))
   argdefs.append(('-d', 'path', str, 'store', 'Destination path', True))
   argdefs.append(('-p', 'packaging-config', str, 'store', 'Packaging Configuration name', False))
@@ -523,7 +523,7 @@ def parseCmdLine():
   
   event = {}
   
-  event['source_url']         = args.o
+  event['source_url']         = args.i
   event['destination_bucket'] = args.b
   event['destination_path']   = args.d
   event['packaging_config']   = args.p
