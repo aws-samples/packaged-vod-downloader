@@ -203,7 +203,6 @@ def fetchStream(event, context):
     }
 
   # Setup variables
-  assetId                     = event['asset_id']
   masterManifestUrl           = event['source_url']
   destBucket                  = event['destination_bucket']
   packagingConfig             = event['packaging_config']
@@ -256,7 +255,7 @@ def fetchStream(event, context):
 
 
   # Inspect destination to check which (if any) files have already been copied)
-  preExistingObjects = listObjectsAtDestination( s3, destBucket, destPath, assetId, packagingConfig )
+  preExistingObjects = listObjectsAtDestination( s3, destBucket, destPath )
 
   logger.info( "Source asset contains %d resources" % len(vodAsset.allResources) )
   logger.info( "%d resources need to be downloaded" % (len(vodAsset.allResources)-len(preExistingObjects)) )
@@ -274,12 +273,10 @@ def fetchStream(event, context):
   threadResults = {}
   with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_NUMBER_THREAD) as executor:
 
-    destPrefix = "%s/%s/%s" % ( destPath, assetId, packagingConfig )
-
     # Start the load operations and mark each future with its thread number
     logger.info('Starting %d threads' % numThreads)
     threadNumbers = list(range(1, numThreads+1))
-    threads = {executor.submit(fetchSegments, n, vodAsset.commonPrefix, fetchQ, s3, destBucket, destPrefix, acl, authHeaders): n for n in threadNumbers}
+    threads = {executor.submit(fetchSegments, n, vodAsset.commonPrefix, fetchQ, s3, destBucket, destPath, acl, authHeaders): n for n in threadNumbers}
 
     ( stopBeforeTimeout, numberQueuedObjects ) = queueObjectsToFetch(preExistingObjects, vodAsset.allResources, vodAsset.commonPrefix, fetchQ, rpsLimit, context)
 
@@ -313,7 +310,7 @@ def fetchStream(event, context):
     aggResults['totalSkippedSegments'] = aggResults['totalSkippedSegments'] + threadResult['totalSkippedSegments']
   
   # Set status on result
-  finalExistingObjects = listObjectsAtDestination( s3, destBucket, destPath, assetId, packagingConfig )
+  finalExistingObjects = listObjectsAtDestination( s3, destBucket, destPath )
   aggResults['objectsAtS3Dest'] = len(finalExistingObjects)
 
   logger.info("Objects found at destination = %d" % len(finalExistingObjects))
@@ -338,18 +335,18 @@ def fetchStream(event, context):
       'message': aggResults['status'],
       'result': aggResults,
       'asset' : {
-        's3Location': getMasterManifestLocation(vodAsset, destBucket, destPath, packagingConfig),
+        's3Location': getMasterManifestLocation(vodAsset, destBucket, destPath),
         'packagingConfiguration': packagingConfig,
         'type': vodAssetType
       }
     }
-  pprint(returnVal)
+
   return returnVal
 
-def getMasterManifestLocation(vodAsset, destBucket, destPath, packagingConfig):
+def getMasterManifestLocation(vodAsset, destBucket, destPath):
   # Determine the location of the master manifest for the asset
   masterManifest = vodAsset.masterManifest
-  s3Prefix = "s3://%s/%s/%s/" % (destBucket, destPath, packagingConfig)
+  s3Prefix = "s3://%s/%s/" % (destBucket, destPath)
   s3MasterManifest = masterManifest.replace( vodAsset.commonPrefix, s3Prefix )
   return s3MasterManifest
 
@@ -409,7 +406,6 @@ def parseVodAssetManifests( assetUrl, authHeaders ):
     vodAssetType = 'hls'
     vodAsset = HlsVodAsset(assetUrl, authHeaders)
 
-
   elif parsedUrl.path.endswith('.mpd'):
     vodAssetType = 'dash'
     vodAsset = DashVodAsset(assetUrl, authHeaders)
@@ -419,26 +415,20 @@ def parseVodAssetManifests( assetUrl, authHeaders ):
 
   return ( vodAsset, vodAssetType )
 
-def listObjectsAtDestination( s3Resource, destBucket, destPath, assetId, packagingConfig ):
-  # Populates a list of all objects in destBucket/assetId.  This is used to know
+def listObjectsAtDestination( s3Resource, destBucket, destPath ):
+  # Populates a list of all objects in destination path.  This is used to know
   # which assets we can skip in the event of a restart or when using the 
   # 'continue' feature when hosted by Lambda
 
   existingObjects = []
-  
 
-  # Determine path where objects are stored
-  prefix="%s/%s/" % (assetId, packagingConfig)
-  if destPath is not None:
-    prefix="%s/%s" % (destPath, prefix)
+  logger.info("Checking for object with prefix: s3://%s/%s" % (destBucket, destPath))
 
-  logger.info("Checking for object with prefix: s3://%s/%s" % (destBucket, prefix))
-
-  for obj in s3Resource.Bucket(destBucket).objects.filter(Prefix=prefix):
-    name = obj.key[len(prefix):]
+  for obj in s3Resource.Bucket(destBucket).objects.filter(Prefix=destPath):
+    name = obj.key[len(destPath):]
     existingObjects.append(name)
 
-  logger.info("Found %d objects exist with '%s' prefix" % ( len(existingObjects), prefix) )
+  logger.info("Found %d objects exist with '%s' prefix" % ( len(existingObjects), destPath) )
 
   return existingObjects
 
@@ -468,7 +458,7 @@ def parseAuthHeaders( input ):
 def validateInputs(event, context):
 
   # Check URL, bucket and Asset ID are specified (and not blank)
-  mandatoryParams = ['source_url', 'destination_bucket', 'asset_id']
+  mandatoryParams = ['source_url', 'destination_bucket', 'destination_path']
   for param in mandatoryParams:
     if (param not in event.keys()) or (event[param] is None) or (event[param] == ''):
       message = "Fatal: Parameter '%s' must be specified" % param
@@ -520,9 +510,8 @@ def parseCmdLine():
   argdefs.append(('-o', 'URL', str, 'store', 'URL for HLS endpoint on origin server', True))
   argdefs.append(('-b', 'bucket', str, 'store', 'Destination S3 bucket name', True))
   argdefs.append(('-d', 'path', str, 'store', 'Destination path', True))
-  argdefs.append(('-p', 'packaging-config', str, 'store', 'Packaging Configuration name', True))
-  argdefs.append(('-a', 'Asset-ID', str, 'store', 'Asset ID (S3 filename prefix, should end in /)', True))
-  argdefs.append(('-r', None, None, 'store_true', 'Removes ad content, leaving markers intact', False))
+  argdefs.append(('-p', 'packaging-config', str, 'store', 'Packaging Configuration name', False))
+  # argdefs.append(('-r', None, None, 'store_true', 'Removes ad content, leaving markers intact', False))
   
   for arg in argdefs:
     if arg[3] == 'store':
@@ -536,11 +525,10 @@ def parseCmdLine():
   
   event['source_url']         = args.o
   event['destination_bucket'] = args.b
+  event['destination_path']   = args.d
   event['packaging_config']   = args.p
-  event['asset_id']           = args.a
   event['numThreads']         = 5
   event['rpsLimit']           = 1000
-  event['destination_path']   = args.d
 
   return event
 

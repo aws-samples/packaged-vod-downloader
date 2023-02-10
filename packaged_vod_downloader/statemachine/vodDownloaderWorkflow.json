@@ -284,7 +284,7 @@
               "Payload": {
                 "numThreads": 20,
                 "destination_bucket.$": "$.createAssetRequest.DestinationBucket",
-                "destination_path.$": "$.createAssetRequest.DestinationPath",
+                "destination_path.$": "States.Format('{}/{}/{}', $.createAssetRequest.DestinationPath, $.createAssetRequest.Id, $.MapIteratorData.EgressEndpoint[0].PackagingConfigurationId)",
                 "packaging_config.$": "$.MapIteratorData.EgressEndpoint[0].PackagingConfigurationId",
                 "packaging_group_auth_header.$": "$.PackagingGroupAuthHeader.SecretString",
                 "asset_id.$": "$.createAssetRequest.Id",
