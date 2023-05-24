@@ -402,7 +402,7 @@ def parseVodAssetManifests( assetUrl, authHeaders ):
 
   parsedUrl = urlparse(assetUrl)
   vodAsset                  = None
-  if parsedUrl.path.endswith('.m3u8'):
+  if parsedUrl.path.endswith('.m3u8') or "format=m3u8-aapl" in parsedUrl.path:
     vodAssetType = 'hls'
     vodAsset = HlsVodAsset(assetUrl, authHeaders)
 
