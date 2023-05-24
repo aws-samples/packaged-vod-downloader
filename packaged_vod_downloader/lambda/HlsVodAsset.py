@@ -106,6 +106,11 @@ def getManifest( url, authHeaders ):
   else:
     urlPayload = response.data
     contentType = response.headers['Content-Type']
+    # Some packagers set the manifest type incorrectly.
+    # This needs to be corrected if the content type is 'binary/octet-stream'
+    if contentType == 'binary/octet-stream':
+      print("Content type was '%s', overriding to '%s'" % (contentType, 'application/x-mpegURL'))
+      contentType = 'application/x-mpegURL'
     expectedLen = int(response.headers['Content-Length'])
     receivedLen = len(urlPayload)
     if receivedLen != expectedLen:
@@ -138,7 +143,8 @@ def parseMasterManifest( masterManifestUrl, masterManifestBody ):
       mediaDict = {}
 
       # Add EXT-X-MEDIA properties to data set 
-      for keyVal in line.split(','):
+      # for keyVal in line.split(','):
+      for keyVal in re.split(r',\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', line):
         (key, val) = keyVal.split('=', 1)
         mediaDict[key] = val.strip('"')
       name = mediaDict['URI']
@@ -199,7 +205,9 @@ def parseVariantManifest( variantManifestUrl, variantManifestBody ):
 
     # Add key to dict if it has not been seen before
     absoluteUrl = name
-    if name:
+    if name and name.startswith("http"):
+      absoluteUrl = name
+    elif name:
       absoluteUrl = normalizeUrl("%s/%s" % (os.path.dirname(variantManifestUrl), name))
 
     if not (absoluteUrl is None or absoluteUrl in segmentsDict.keys()):
