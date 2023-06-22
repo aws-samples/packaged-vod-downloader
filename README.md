@@ -88,7 +88,7 @@ Once the synthesize command is successful, you can deploy the workflow. Ensure y
 $ cdk deploy --parameters email=user@sample.com --parameters mediapackageRole=MediaPackage_Default_Role --parameters mediaPackageCdnAuthSecretArn=arn:aws:secretsmanager:ap-southeast-2:0123456789012:secret:MyMediaPackageCdnAuthSecret-XXXXXX
 ```
 
-The 'email' parameter (required) specifies the distination for SNS topic notifications. During the installation emails will be sent to the specified email address to subscribe to two SNS topics. Click in the link to accept the email.
+The 'email' parameter (required) specifies the destination for SNS topic notifications. During the installation emails will be sent to the specified email address to subscribe to two SNS topics. Click in the link to accept the email.
 
 The 'medipackageRole' parameter (optional) defines the role to be used for the creation of AWS Elemental MediaPackage VOD assets. This role needs to have permission to create the AWS Elemental MediaPackage VOD assets and access the source content to be ingested. Then default value MediaPackage_Default_Role.
 
