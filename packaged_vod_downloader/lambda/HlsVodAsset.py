@@ -111,11 +111,14 @@ def getManifest( url, authHeaders ):
     if contentType == 'binary/octet-stream':
       print("Content type was '%s', overriding to '%s'" % (contentType, 'application/x-mpegURL'))
       contentType = 'application/x-mpegURL'
-    expectedLen = int(response.headers['Content-Length'])
-    receivedLen = len(urlPayload)
-    if receivedLen != expectedLen:
-      print('HlsVodAsset: ', url, 'expected', expectedLen, '; received', receivedLen)
-      urlPayload = None
+
+    # Not all servers return a 'Content-Length' header. If available it is worth checking
+    if 'Content-Length' in response.headers.keys():
+      expectedLen = int(response.headers['Content-Length'])
+      receivedLen = len(urlPayload)
+      if receivedLen != expectedLen:
+        print('HlsVodAsset: ', url, 'expected', expectedLen, '; received', receivedLen)
+        urlPayload = None
 
   if not( urlPayload is None ):
     urlPayload = urlPayload.decode('utf-8')
@@ -143,11 +146,14 @@ def parseMasterManifest( masterManifestUrl, masterManifestBody ):
       mediaDict = {}
 
       # Add EXT-X-MEDIA properties to data set 
-      # for keyVal in line.split(','):
       for keyVal in re.split(r',\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', line):
         (key, val) = keyVal.split('=', 1)
         mediaDict[key] = val.strip('"')
       name = mediaDict['URI']
+
+    elif line == "":
+      # Skip blank lines
+      next
 
     # Parse lines which do not start with a comment
     # e.g. ../../../bf4fc289ea7a4a9a8030bfdfb6dd8180/75449fe7ed1a49288019306701174382/index_1_0.ts
@@ -156,7 +162,9 @@ def parseMasterManifest( masterManifestUrl, masterManifestBody ):
 
     # Add key to dict if it has not been seen before
     absoluteUrl = name
-    if name:
+    if name and name.startswith("http"):
+      absoluteUrl = name
+    elif name:
       absoluteUrl = normalizeUrl("%s/%s" % (os.path.dirname(masterManifestUrl), name))
 
     if not (absoluteUrl is None or absoluteUrl in variantsDict.keys()):
@@ -193,7 +201,7 @@ def parseVariantManifest( variantManifestUrl, variantManifestBody ):
       mediaDict = {}
 
       # Add EXT-X-MEDIA properties to data set 
-      for keyVal in line.split(','):
+      for keyVal in re.split(r',\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', line):
         (key, val) = keyVal.split('=', 1)
         mediaDict[key] = val.strip('"')
       name = mediaDict['URI']

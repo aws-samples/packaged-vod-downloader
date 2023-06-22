@@ -65,13 +65,6 @@ s3 = boto3.resource('s3')
 
 def loadUrlWorker(caller, url, authHeaders):
 
-  injectErrors = False
-
-  if injectErrors:
-    if int(random.random() * 10000.0) % 37 == 0:
-      # Corrupt url (delete one characater at random) to test retry logic
-      pos = random.randint(1,len(url)-2)
-      url = url[0:pos] + url[pos+1:]
   try:
     response = poolManager.request( "GET", url, headers=authHeaders )
   except IOError as urlErr:
@@ -84,25 +77,24 @@ def loadUrlWorker(caller, url, authHeaders):
 # 200 (success) is returned to caller as an error.
 
   if response.status != 200:
+    logger.info("Failed to download '%s'" % url)
     urlPayload = None
     contentType = None
     print('http error', response.status, 'fetching', url)
   else:
 
 # Get the payload.
-
-    expectedLen = int(response.headers['Content-Length'])
-    contentType = response.headers['Content-Type']
-    if injectErrors:
-      if int(random.random() * 10000.0) % 29 == 0:
-        # Corrupt expectedLen (increase by 1) to test retry
-        expectedLen += 1
     urlPayload = response.data
     receivedLen = len(urlPayload)
-    if receivedLen != expectedLen:
-      print(caller+':', url, 'expected', expectedLen, '; received', receivedLen)
-      urlPayload = None
-      contentType = None
+    contentType = response.headers['Content-Type']
+
+    # Not all servers return a 'Content-Length' header. If available it is worth checking
+    if 'Content-Length' in response.headers.keys():
+      expectedLen = int(response.headers['Content-Length'])
+      if receivedLen != expectedLen:
+        print(caller+':', url, 'expected', expectedLen, '; received', receivedLen)
+        urlPayload = None
+        contentType = None
 
   return (urlPayload, contentType)
 
@@ -205,7 +197,6 @@ def fetchStream(event, context):
   # Setup variables
   masterManifestUrl           = event['source_url']
   destBucket                  = event['destination_bucket']
-  packagingConfig             = event['packaging_config']
   packaging_group_auth_header = None
   if 'packaging_group_auth_header' in event.keys():
     packaging_group_auth_header = event['packaging_group_auth_header']
@@ -336,7 +327,6 @@ def fetchStream(event, context):
       'result': aggResults,
       'asset' : {
         's3Location': getMasterManifestLocation(vodAsset, destBucket, destPath),
-        'packagingConfiguration': packagingConfig,
         'type': vodAssetType
       }
     }
@@ -406,7 +396,7 @@ def parseVodAssetManifests( assetUrl, authHeaders ):
     vodAssetType = 'hls'
     vodAsset = HlsVodAsset(assetUrl, authHeaders)
 
-  elif parsedUrl.path.endswith('.mpd'):
+  elif parsedUrl.path.endswith('.mpd') or "format=mpd-time-csf" in parsedUrl.path:
     vodAssetType = 'dash'
     vodAsset = DashVodAsset(assetUrl, authHeaders)
 
@@ -532,7 +522,6 @@ def parseCmdLine():
   event['source_url']         = args.i
   event['destination_bucket'] = args.b
   event['destination_path']   = args.d
-  event['packaging_config']   = args.p
   event['numThreads']         = 5
   event['rpsLimit']           = 1000
 
